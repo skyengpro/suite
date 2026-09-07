@@ -1,0 +1,130 @@
+# ============================================================================
+# Sync upstream -> fork (automated review PR)
+# ============================================================================
+# 🔧 TO REUSE ON ANOTHER REPO: look for the blocks marked "🔧 ADAPT THIS"
+#    below. Nothing else needs to be touched.
+# Path: .github/workflows/sync-upstream.yml
+# ============================================================================
+
+name: Sync upstream (code)
+
+on:
+  schedule:
+    - cron: "0 6 * * *"    # daily at 06:00 UTC — 🔧 ADAPT THIS if needed
+  workflow_dispatch: {}     # manual trigger from the Actions tab
+
+# Prevents two runs from stepping on each other (cron + a simultaneous manual
+# trigger, or two crons overlapping if a run takes too long). Without this,
+# two concurrent force-pushes to SYNC_BRANCH can corrupt state or create
+# duplicate PRs.
+concurrency:
+  group: sync-upstream-${{ github.repository }}
+  cancel-in-progress: false   # let an in-progress run finish rather than killing it mid-way
+
+env:
+  UPSTREAM_URL: https://github.com/e3426754-hash/code.git   # 🔧 ADAPT THIS: URL of the source repo
+  BRANCH: master                                             # 🔧 ADAPT THIS: branch to track, both upstream AND on the fork
+  SYNC_BRANCH: sync/upstream-master                          # fixed name -> idempotent, no duplicate branches
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10   # a sync job should never run long; avoids a stuck run burning CI quota
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      # --------------------------------------------------------------------
+      # Fail-fast: if the PAT secret isn't configured, say so immediately
+      # instead of failing 4 steps later with a cryptic auth error.
+      # Essential if you copy this workflow to another repo and forget to
+      # recreate the secret.
+      # --------------------------------------------------------------------
+      - name: Check that SYNC_PAT secret is present
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.SYNC_PAT }}" ]; then
+            echo "::error::SYNC_PAT secret is not configured on this repo (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          echo "[debug] SYNC_PAT is present."
+
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history required to compare with upstream — needed, don't reduce
+          token: ${{ secrets.SYNC_PAT }}   # classic PAT, "repo" scope — 🔧 ADAPT THIS: recreate this secret on the new repo
+
+      - name: Add upstream remote
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_URL"
+          echo "[debug] upstream remote added: $UPSTREAM_URL"
+
+      - name: Fetch upstream branch
+        run: |
+          set -euo pipefail
+          git fetch upstream "$BRANCH"
+          echo "[debug] fetch upstream/$BRANCH done"
+
+      - name: Compare with upstream
+        id: diff
+        run: |
+          set -euo pipefail
+          BEHIND=$(git rev-list --count HEAD..upstream/"$BRANCH")
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "[debug] Commits behind detected: $BEHIND"
+
+      - name: Check whether a sync PR is already open
+        if: steps.diff.outputs.behind != '0'
+        id: existing_pr
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+        run: |
+          set -euo pipefail
+          COUNT=$(gh pr list --repo "${{ github.repository }}" --head "$SYNC_BRANCH" --state open --json number --jq 'length')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "[debug] Open PR(s) already on $SYNC_BRANCH: $COUNT"
+
+      - name: Update sync branch (force push)
+        if: steps.diff.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+        run: |
+          set -euo pipefail
+          git checkout -B "$SYNC_BRANCH" upstream/"$BRANCH"
+          git push origin "$SYNC_BRANCH" --force -u
+          echo "[debug] $SYNC_BRANCH pushed, tracking set to origin"
+
+      - name: Create PR (if it doesn't already exist)
+        if: steps.diff.outputs.behind != '0' && steps.existing_pr.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_PAT }}
+        run: |
+          set -euo pipefail
+          gh pr create \
+            --repo "${{ github.repository }}" \
+            --base "$BRANCH" \
+            --head "$SYNC_BRANCH" \
+            --title "Sync: ${{ steps.diff.outputs.behind }} commit(s) upstream (code)" \
+            --body "Automated sync from $UPSTREAM_URL ($BRANCH). Review before merging."
+          echo "[debug] PR created."
+
+      - name: PR already exists -> nothing to do
+        if: steps.diff.outputs.behind != '0' && steps.existing_pr.outputs.count != '0'
+        run: echo "[debug] $SYNC_BRANCH updated, the existing PR automatically reflects the new commits."
+
+      # --------------------------------------------------------------------
+      # Summary visible directly in the Actions tab, without opening each
+      # step's logs. Useful once this workflow runs silently on a cron
+      # schedule for weeks.
+      # --------------------------------------------------------------------
+      - name: Run summary
+        if: always()
+        run: |
+          {
+            echo "### Upstream sync result"
+            echo "- Commits behind detected: ${{ steps.diff.outputs.behind || 'N/A' }}"
+            echo "- Open PR already present before this run: ${{ steps.existing_pr.outputs.count || 'N/A' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
