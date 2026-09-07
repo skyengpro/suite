@@ -22,9 +22,9 @@ concurrency:
   cancel-in-progress: false   # let an in-progress run finish rather than killing it mid-way
 
 env:
-  UPSTREAM_URL: https://github.com/e3426754-hash/code.git   # 🔧 ADAPT THIS: URL of the source repo
-  BRANCH: master                                             # 🔧 ADAPT THIS: branch to track, both upstream AND on the fork
-  SYNC_BRANCH: sync/upstream-master                          # fixed name -> idempotent, no duplicate branches
+  UPSTREAM_URL: https://github.com/frappe/suite.git   # 🔧 ADAPT THIS: URL of the source repo
+  BRANCH: develop                                             # 🔧 ADAPT THIS: branch to track, both upstream AND on the fork
+  SYNC_BRANCH: sync/upstream-develop                          # fixed name -> idempotent, no duplicate branches
 
 jobs:
   sync:
