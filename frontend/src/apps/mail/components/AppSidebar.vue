@@ -125,7 +125,8 @@ import {
 import { accountSubmenu } from '@/composables/accountSubmenu'
 import { useAppSwitcher } from '@/composables/useAppSwitcher'
 import { FOLDER_ICON_COLOR_MAP } from '@/apps/mail/constants'
-import { canMoveToMailbox, getIcon, getMailboxName, toTitleCase } from '@/apps/mail/utils'
+import { getIcon, getMailboxName, toTitleCase } from '@/apps/mail/utils'
+import { canMoveToMailbox } from '@/apps/mail/utils/mailboxTargets'
 import { useAccountSwitch, useScreenSize, useSettings, useShortcuts, useSidebar } from '@/apps/mail/utils/composables'
 import { useThreadDrag } from '@/apps/mail/composables/useThreadDrag'
 import { sessionStore } from '@/apps/mail/stores/session'
@@ -147,12 +148,14 @@ import Crown from '~icons/lucide/crown'
 import Ellipsis from '~icons/lucide/ellipsis'
 import Globe from '~icons/lucide/globe'
 import House from '~icons/lucide/house'
+import Lock from '~icons/lucide/lock'
 import LogOut from '~icons/lucide/log-out'
 import Mailbox from '~icons/lucide/mailbox'
 import Mails from '~icons/lucide/mails'
 import Megaphone from '~icons/lucide/megaphone'
 import Plus from '~icons/lucide/plus'
 import Settings from '~icons/lucide/settings'
+import ShieldCheck from '~icons/lucide/shield-check'
 import Star from '~icons/lucide/star'
 import Trash2 from '~icons/lucide/trash-2'
 import Users from '~icons/lucide/users'
@@ -188,15 +191,16 @@ const threadDrag = useThreadDrag()
 
 /**
  * Folders that can take a drop: exactly the ones the "Move to" menu offers, read from the same
- * predicate so the two lists cannot drift. That rules out the mailbox the thread is already in,
- * along with Sent, Drafts and the Screener; Junk and Trash stay in, since handleMoveThreads reads
- * those as "mark as spam" and "delete", which is what dropping there means. Sidebar entries that
- * are not real mailboxes — Starred, All Inboxes, Outbox — have no id and fall out on their own.
+ * predicate — and from the same membership, which the drag carries over from the list — so the two
+ * lists cannot drift. That rules out the folders the dragged threads are already in, along with
+ * Sent, Drafts and the Screener; Junk and Trash stay in, since handleMoveThreads reads those as
+ * "mark as spam" and "delete", which is what dropping there means. Sidebar entries that are not
+ * real mailboxes — Starred, All Inboxes, Outbox — have no id and fall out on their own.
  */
 const canDrop = (item: { mailboxId?: string }) =>
 	threadDrag.isDragging.value &&
 	!!mailboxes.data?.some((m: MailboxData) => m.id === item.mailboxId) &&
-	canMoveToMailbox(item.mailboxId, route.params.mailbox as string, store.mailboxIds)
+	canMoveToMailbox(item.mailboxId, threadDrag.filedIn.value, store.mailboxIds)
 
 const onFolderDragOver = (e: DragEvent, item: { mailboxId?: string }) => {
 	if (!canDrop(item)) return
@@ -352,6 +356,18 @@ const dashboardItems = [
 				to: { name: 'mail-domains' },
 				activeFor: ['mail-domains', 'mail-domain'],
 			},
+			{
+				label: __('DMARC Reports'),
+				icon: ShieldCheck,
+				to: { name: 'mail-dmarc-reports' },
+				activeFor: ['mail-dmarc-reports', 'mail-dmarc-report'],
+			},
+			{
+				label: __('TLS Reports'),
+				icon: Lock,
+				to: { name: 'mail-tls-reports' },
+				activeFor: ['mail-tls-reports', 'mail-tls-report'],
+			},
 		],
 	},
 ]
@@ -359,7 +375,12 @@ const dashboardItems = [
 const mailboxItems = computed(
 	() =>
 		mailboxes.data
-			?.filter((mailbox: MailboxData) => mailbox.subscribed)
+			// The Screener is listed even unsubscribed: it can't be hidden from Folder settings, and
+			// Stalwart recreates it unsubscribed when the screening Sieve script brings it back.
+			?.filter(
+				(mailbox: MailboxData) =>
+					mailbox.subscribed || mailbox.id === store.mailboxIds.screener,
+			)
 			?.map((mailbox: MailboxData) => {
 				// The Screening folder opens the dedicated Screener page, not the thread list.
 				const isScreener = mailbox.id === store.mailboxIds.screener

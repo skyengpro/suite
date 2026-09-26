@@ -246,7 +246,7 @@ def notify_organizer_of_reply(
             account=account,
             from_name=responder_name,
             from_email=responder_email,
-            recipients=[{"name": None, "email": organizer, "type": "To"}],
+            recipients=[{"display_name": None, "email": organizer, "type": "To"}],
             raw_message=message,
             via_api=True,
             delivery_mode="Enqueue",
@@ -319,7 +319,7 @@ def _send(
         account=account,
         from_name=from_name,
         from_email=organizer,
-        recipients=[{"name": (participant or {}).get("name"), "email": email, "type": "To"}],
+        recipients=[{"display_name": (participant or {}).get("name"), "email": email, "type": "To"}],
         raw_message=message,
         via_api=True,
         delivery_mode="Enqueue",
@@ -479,7 +479,9 @@ def _build_mime(from_name, organizer, to_email, subject, html, ics, method) -> s
     attachment.add_header("Content-Disposition", "attachment", filename="invite.ics")
     root.attach(attachment)
 
-    return root.as_string()
+    # CRLF line endings, as RFC 5322 requires. Python's default is a bare LF, which a relay
+    # rewrites in transit: the DKIM body hash then fails and the invite lands in Junk.
+    return root.as_string(policy=root.policy.clone(linesep="\r\n"))
 
 
 def _plain_text(html: str) -> str:
