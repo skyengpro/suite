@@ -97,6 +97,7 @@ execute:frappe.db.set_single_value("Mail Settings", "expand_mailing_list_partici
 execute:frappe.db.set_single_value("Mail Settings", "max_mailing_list_participants", 100)
 suite.mail.patches.remove_held_queue_statuses
 suite.mail.patches.hand_over_deployment_to_suite_cloud
+suite.mail.patches.rebuild_screening_gates
 # --- calendar ---
 # (no patches)
 # --- suite_core ---
@@ -104,4 +105,5 @@ suite.mail.patches.hand_over_deployment_to_suite_cloud
 execute:frappe.db.set_single_value("Suite Settings", "is_onboarded", 1) if frappe.is_setup_complete() else None
 suite.suite_core.patches.move_blob_store_out_of_private
 suite.suite_core.patches.align_owner_with_user
+suite.suite_core.patches.remove_desk_access_from_suite_roles
 suite.drive.patches.webdav_property_index

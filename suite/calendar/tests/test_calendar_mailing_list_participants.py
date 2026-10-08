@@ -18,9 +18,9 @@ from suite.calendar.doctype.calendar_event.mailing_lists import (
     expand_mailing_list_participants,
 )
 from suite.calendar.doctype.calendar_exchange.calendar_exchange import jscalendar_to_vevent
+from suite.calendar.jmap_events import participants_map
 from suite.mail.api.admin import add_mailing_list_recipients, get_mailing_list
 from suite.mail.directory import get_mailing_list_index
-from suite.mail.jmap.services.calendars.calendar_event import CalendarEventService
 from suite.mail.tests.base import StalwartIntegrationTestCase, unique_name
 
 MODULE = "suite.calendar.doctype.calendar_event.mailing_lists"
@@ -307,7 +307,7 @@ class TestMailingListParticipantExpansion(IntegrationTestCase):
         # Members reset fields to None rather than leaving them out, which the serialiser must take.
         team, alice, _ = self.expand([participant("team@example.com", kind=None)])
 
-        serialised = CalendarEventService._get_participants_map([team, alice])
+        serialised = participants_map([team, alice])
 
         self.assertEqual(serialised[team["uid"]]["scheduleAgent"], "none")
         self.assertEqual(serialised[team["uid"]]["kind"], "group")
@@ -393,6 +393,23 @@ class TestMailingListInviteAddressing(IntegrationTestCase):
         self.assertEqual(
             {kw["recipients"][0]["email"] for kw in sent}, {"alice@example.com", "boss@example.org"}
         )
+
+    def test_the_invite_mail_has_no_bare_line_feeds(self):
+        """A bare LF is rewritten in transit, which breaks the DKIM body hash (Outlook junks it)."""
+
+        sent = []
+
+        with (
+            patch(f"{INVITATIONS}.get_user_for_jmap_account", return_value="organizer@example.com"),
+            patch(f"{INVITATIONS}.get_participant_identities", return_value=[]),
+            patch(f"{INVITATIONS}.MailQueue._create", side_effect=lambda **kw: sent.append(kw)),
+            patch(f"{INVITATIONS}.log_error", side_effect=AssertionError),
+        ):
+            notify_participants("acc", "invite", event_snapshot=self.event() | {"id": "e1"})
+
+        self.assertTrue(sent)
+        for kw in sent:
+            self.assertNotIn("\n", kw["raw_message"].replace("\r\n", ""))
 
     def test_the_itip_attendee_records_the_membership(self):
         event = self.event() | {
